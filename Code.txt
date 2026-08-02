@@ -1,0 +1,139 @@
+!pip install nltk
+
+# Import necessary libraries
+import pandas as pd
+import string
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from collections import defaultdict, Counter
+import nltk
+
+# Download necessary NLTK data
+nltk.download('punkt')
+nltk.download('stopwords')
+
+# Load the dataset from the given path
+dataset_path = '/content/Gift_Cards.csv'
+data = pd.read_csv(dataset_path)
+
+# Display basic information
+print(f"Dataset Loaded: {data.shape[0]} rows")
+print(data.head())
+
+def map_sentiment(rating):
+    if rating >= 4:
+        return 'positive'
+    elif rating == 3:
+        return 'neutral'
+    else:
+        return 'negative'
+
+data['sentiment'] = data['overall'].apply(map_sentiment)
+
+# Preprocess the reviews
+def preprocess_text(text):
+    # Check if the input is a string
+    if isinstance(text, str):
+        # Convert to lowercase
+        text = text.lower()
+        # Remove punctuation
+        text = text.translate(str.maketrans('', '', string.punctuation))
+        # Tokenize and remove stopwords
+        tokens = word_tokenize(text)
+        tokens = [word for word in tokens if word not in stopwords.words('english')]
+        return tokens
+    else:
+        # Handle non-string values (e.g., return empty list or a placeholder)
+        return []  # Return an empty list for non-string values
+
+data['processed_review'] = data['reviewText'].apply(preprocess_text)
+
+X = data['processed_review']
+y = data['sentiment']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.4, random_state=42, stratify=y)
+
+class HMMClassifier:
+    def __init__(self):
+        self.transition_probs = defaultdict(Counter)  # Transition probabilities
+        self.emission_probs = defaultdict(Counter)    # Emission probabilities
+        self.start_probs = Counter()                  # Start probabilities
+
+    def train(self, X, y):
+        for review, label in zip(X, y):
+            self.start_probs[label] += 1
+            for word in review:
+                self.emission_probs[label][word] += 1
+            for i in range(len(review) - 1):
+                self.transition_probs[label][review[i], review[i + 1]] += 1
+
+        # Normalize probabilities
+        self.start_probs = {k: v / sum(self.start_probs.values()) for k, v in self.start_probs.items()}
+        for label in self.emission_probs:
+            total_emissions = sum(self.emission_probs[label].values())
+            self.emission_probs[label] = {k: v / total_emissions for k, v in self.emission_probs[label].items()}
+            total_transitions = sum(self.transition_probs[label].values())
+            self.transition_probs[label] = {k: v / total_transitions for k, v in self.transition_probs[label].items()}
+
+    def predict(self, review):
+        scores = {}
+        for label in self.start_probs:
+            score = np.log(self.start_probs[label])
+            for i, word in enumerate(review):
+                score += np.log(self.emission_probs[label].get(word, 1e-6))
+                if i < len(review) - 1:
+                    bigram = (review[i], review[i + 1])
+                    score += np.log(self.transition_probs[label].get(bigram, 1e-6))
+            scores[label] = score
+        return max(scores, key=scores.get)
+
+# Train the HMM model
+hmm = HMMClassifier()
+hmm.train(X_train, y_train)
+
+# Predict on the test set
+y_pred = [hmm.predict(review) for review in X_test]
+
+!pip install scikit-learn
+# Import necessary libraries
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import classification_report
+
+# Evaluation Function
+def evaluate_model(y_true, y_pred):
+    accuracy = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, average='weighted')
+    recall = recall_score(y_true, y_pred, average='weighted')
+    f1 = f1_score(y_true, y_pred, average='weighted')
+
+    print("Evaluation Metrics:")
+    print(f"Accuracy:  {accuracy:.2f}")
+    print(f"Precision: {precision:.2f}")
+    print(f"Recall:    {recall:.2f}")
+    print(f"F1-Score:  {f1:.2f}")
+
+# Evaluate the model
+evaluate_model(y_test, y_pred)
+
+# Print Classification Report
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+sample_reviews = [
+    "This gift card was perfect for my friend's birthday! She loved it.",
+    "I had trouble redeeming this gift card, it took forever to process.",
+    "The gift card was okay, it worked fine but I was expecting more variety.",
+    "Great card, fast delivery, and the recipient was really happy with it.",
+    "I had a bad experience with this card. The value was not as expected.",
+    "The gift card works, but it’s just a basic design. Nothing special.",
+    "Absolutely love this gift card! Great idea for a last-minute gift.",
+    "It took too long to get the email with the gift card code.",
+    "I’ve bought many of these gift cards, and they always arrive on time.",
+    "It’s decent, but I think there are better options out there."
+]
+for sentence in sample_reviews:
+    print(f"Input: {sentence}")
+    # Use the predict method instead of directly calling the object
+    print(f"Predicted Class: {hmm.predict(sentence)}\n")
